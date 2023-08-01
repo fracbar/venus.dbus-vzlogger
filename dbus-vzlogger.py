@@ -24,6 +24,8 @@ VZLOGGER_CONSUMPTION_UUID="dbc081e0-f188-11e2-8e30-3dd74b6c6043"
 VZLOGGER_REVERSE_UUID="8a834b00-fa42-11e7-a4b9-df1027ed2346"
 VZLOGGER_FORWARD_UUID="5078fef0-fa42-11e7-a3aa-8fcd37e01f0e"
 
+path_UpdateIndex = '/UpdateIndex'
+
 
 class DbusDummyService:
     def __init__(self, servicename, deviceinstance, paths, productname='volkszaehler.org',
@@ -62,22 +64,30 @@ class DbusDummyService:
         reverse_item = next(filter(lambda item: item['uuid'] == VZLOGGER_REVERSE_UUID, meter_data['data']), {'tuples' : [[0, 0]]})
         forward_item = next(filter(lambda item: item['uuid'] == VZLOGGER_FORWARD_UUID, meter_data['data']), {'tuples' : [[0, 0]]})
 
-        consumption = '{:4.2f}'.format(consumption_item['tuples'][0][1])
-        consumption_1p = '{:4.2f}'.format(consumption_item['tuples'][0][1] / 3) # my meter is only providing sum of all phases
+        consumption = float(format(consumption_item['tuples'][0][1]))
+        consumption_1p = round(consumption / 3, 2)  # my meter is only providing sum of all phases
 
         self._dbusservice['/Ac/Power'] = consumption  # positive: consumption, negative: feed into grid
-        #self._dbusservice['/Ac/L1/Voltage'] = 0 # not provided
-        #self._dbusservice['/Ac/L2/Voltage'] = 0 # not provided
-        #self._dbusservice['/Ac/L3/Voltage'] = 0 # not provided
-        #self._dbusservice['/Ac/L1/Current'] = 0 # not provided
-        #self._dbusservice['/Ac/L2/Current'] = 0 # not provided
-        #self._dbusservice['/Ac/L3/Current'] = 0 # not provided
+        self._dbusservice['/Ac/L1/Voltage'] = 230 # not provided
+        self._dbusservice['/Ac/L2/Voltage'] = 230 # not provided
+        self._dbusservice['/Ac/L3/Voltage'] = 230 # not provided
+        power = round(consumption_1p / 230, 2)
+        self._dbusservice['/Ac/L1/Current'] = power # not provided
+        self._dbusservice['/Ac/L2/Current'] = power # not provided
+        self._dbusservice['/Ac/L3/Current'] = power # not provided
+
         self._dbusservice['/Ac/L1/Power'] = consumption_1p
         self._dbusservice['/Ac/L2/Power'] = consumption_1p
         self._dbusservice['/Ac/L3/Power'] = consumption_1p
-        self._dbusservice['/Ac/Energy/Forward'] = '{:07.2f}'.format(forward_item['tuples'][0][1] / 1000)
-        self._dbusservice['/Ac/Energy/Reverse'] = '{:07.2f}'.format(reverse_item['tuples'][0][1] / 1000)
+        self._dbusservice['/Ac/Energy/Forward'] = round(forward_item['tuples'][0][1] / 1000, 2)
+        self._dbusservice['/Ac/Energy/Reverse'] = round(reverse_item['tuples'][0][1] / 1000, 2)
         logging.info("House consumption: %s" % (consumption))
+
+        index = self._dbusservice[path_UpdateIndex] + 1  # increment index
+        if index > 255:   # maximum value of the index
+         index = 0       # overflow from 255 to 0
+        self._dbusservice[path_UpdateIndex] = index
+
         return True
 
     def _handlechangedvalue(self, path, value):
@@ -93,7 +103,7 @@ def main():
     DBusGMainLoop(set_as_default=True)
 
     pvac_output = DbusDummyService(
-        servicename='com.victronenergy.grid',
+        servicename='com.victronenergy.grid.vzmeter',
         deviceinstance=0,
         paths={
             '/Ac/Power': {'initial': 0},
@@ -108,6 +118,7 @@ def main():
             '/Ac/L3/Power': {'initial': 0},
             '/Ac/Energy/Forward': {'initial': 0},  # energy bought from the grid
             '/Ac/Energy/Reverse': {'initial': 0},  # energy sold to the grid
+            path_UpdateIndex: {'initial': 0},
         })
 
     logging.info('Connected to dbus, and switching over to gobject.MainLoop() (= event based)')
